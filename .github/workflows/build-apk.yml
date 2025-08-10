@@ -12,6 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx2g
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +30,19 @@ jobs:
         with:
           channel: 'stable'
 
-      # Gera android/ caso o repo tenha só lib/ e pubspec.yaml
+      # Instala o Android SDK + componentes necessários e aceita licenças
+      - name: Install Android SDK components
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      # Se o repositório não tiver a pasta android/ (só lib/ e pubspec.yaml),
+      # geramos o esqueleto e devolvemos seus arquivos.
       - name: Create Flutter skeleton if missing
         run: |
           set -e
@@ -43,9 +58,11 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      # Gera APK debug (assinado com debug-keystore, ideal para instalar no tablet)
       - name: Build debug APK
         run: flutter build apk --debug
 
+      # (Opcional) também gerar release (ainda sem assinatura de release)
       - name: Build release APK
         run: flutter build apk --release
 
