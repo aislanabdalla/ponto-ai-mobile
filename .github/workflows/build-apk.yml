@@ -1,39 +1,24 @@
-name: Build Android APK
+# .github/workflows/build-apk.yml
+name: Construir APK Android
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, principal ]
-    paths:
-      - '**/*.dart'
-      - '**/pubspec.yaml'
-      - '**/android/**'
-      - '.github/workflows/build-apk.yml'
+    branches: [ main, principal ]  # deixe os dois
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      JAVA_TOOL_OPTIONS: -Xmx3g
-      GRADLE_OPTS: -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8'
+    # Se seu projeto Flutter está na RAIZ, mude para "."
+    defaults:
+      run:
+        working-directory: mobile
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect Flutter dir
-        id: detect
-        run: |
-          if [ -f "mobile/pubspec.yaml" ]; then echo "FLUTTER_DIR=mobile" >> $GITHUB_ENV; else echo "FLUTTER_DIR=." >> $GITHUB_ENV; fi
-          echo "Using dir: ${FLUTTER_DIR:-.}"
-
-      - name: Show tree
-        run: |
-          ls -la
-          echo "----"
-          ls -la "$FLUTTER_DIR"
-
-      - name: Setup Java 17
+      - name: Setup Java 17 (AGP 8+ exige JDK 17)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,84 +30,28 @@ jobs:
           channel: stable
           cache: true
 
-      # Normaliza estrutura: biblioteca->lib, garante main.dart e name seguro no pubspec
-      - name: Normalize lib/ and pubspec
-        run: |
-          set -e
-          cd "$FLUTTER_DIR"
-          if [ ! -d lib ] && [ -d biblioteca ]; then mv biblioteca lib; fi
-          if [ ! -f lib/main.dart ]; then
-            printf '%s\n' \
-"import 'package:flutter/material.dart';" \
-"void main() => runApp(const MaterialApp(home: Scaffold(body: Center(child: Text(\"Ponto-AI\")))));" \
-> lib/main.dart
-          fi
-          if grep -q '^name:' pubspec.yaml; then
-            sed -i "s/^name:.*/name: ponto_ai/" pubspec.yaml
-          else
-            printf '%s\n%s\n' "name: ponto_ai" "$(cat pubspec.yaml)" > pubspec.tmp && mv pubspec.tmp pubspec.yaml
-          fi
+      - run: flutter --version
+      - run: flutter pub get
 
-      - name: Flutter doctor
-        run: cd "$FLUTTER_DIR" && flutter doctor -v
+      - name: Dar permissão ao gradlew
+        run: chmod +x android/gradlew
 
-      - name: Pub get
-        run: cd "$FLUTTER_DIR" && flutter pub get
-
-      - name: Ensure Android project (create if missing)
-        run: |
-          set -e
-          cd "$FLUTTER_DIR"
-          if [ ! -d android ]; then
-            flutter create . --platforms=android
-          fi
-          if [ ! -f android/gradlew ]; then
-            mv lib lib_tmp; mv pubspec.yaml pubspec_tmp.yaml
-            rm -rf android ios
-            flutter create . --platforms=android
-            rm -rf lib; mv lib_tmp lib
-            mv pubspec_tmp.yaml pubspec.yaml
-          fi
-          chmod +x android/gradlew
-
-      - name: Android SDK & licenses
-        run: |
-          set -e
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDKMGR" ]; then SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/bin/sdkmanager"; fi
-          yes | "$SDKMGR" --licenses || true
-          "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Force minSdk/compileSdk (best effort)
-        run: |
-          APP="$FLUTTER_DIR/android/app/build.gradle"
-          PROPS="$FLUTTER_DIR/android/gradle.properties"
-          if [ -f "$APP" ]; then
-            sed -i 's/minSdkVersion[[:space:]]\+[0-9][0-9]*/minSdkVersion 21/' "$APP" || true
-            sed -i 's/compileSdkVersion[[:space:]]\+[0-9][0-9]*/compileSdkVersion 34/' "$APP" || true
-          fi
-          if [ -f "$PROPS" ]; then
-            if grep -q "flutter.minSdkVersion" "$PROPS"; then
-              sed -i 's/flutter.minSdkVersion=.*/flutter.minSdkVersion=21/' "$PROPS" || true
-            else
-              echo "flutter.minSdkVersion=21" >> "$PROPS"
-            fi
-          fi
-
+      # APK debug (já assinado com keystore de debug) — ideal pra instalar no tablet
       - name: Build APK (debug)
-        run: cd "$FLUTTER_DIR" && flutter build apk --debug
+        run: flutter build apk --debug
 
-      - name: Build APK (release - unsigned)
-        run: cd "$FLUTTER_DIR" && flutter build apk --release
+      # APK release (unsigned) — para publicar depois (precisa assinatura)
+      - name: Build APK (release)
+        run: flutter build apk --release
 
-      - name: List APKs
-        run: find "$FLUTTER_DIR/build/app/outputs" -type f -name "*.apk" -print
-
-      - name: Upload APKs
+      - name: Upload APK debug
         uses: actions/upload-artifact@v4
         with:
-          name: ponto-ai-apks
-          path: |
-            ${{ env.FLUTTER_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
-            ${{ env.FLUTTER_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          name: app-debug.apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Upload APK release (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-unsigned.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
