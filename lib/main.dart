@@ -3,6 +3,7 @@ import 'screens/enroll_screen.dart';
 import 'screens/punch_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const PontoAI());
 }
 
@@ -13,7 +14,11 @@ class PontoAI extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ponto-AI (MVP)',
-      theme: ThemeData(useMaterial3: true),
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.blue,
+      ),
       home: const HomeScreen(),
     );
   }
@@ -30,15 +35,23 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            ElevatedButton(
-              onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const EnrollScreen())),
+            FilledButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const EnrollScreen()),
+                );
+              },
               child: const Text('Cadastrar rosto'),
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const PunchScreen())),
+            FilledButton.tonal(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PunchScreen()),
+                );
+              },
               child: const Text('Bater ponto'),
             ),
           ],
