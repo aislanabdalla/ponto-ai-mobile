@@ -30,7 +30,7 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # Aceita licenças e garante SDK/build-tools (tenta ambos os caminhos do sdkmanager)
+      # Aceita licenças e garante SDK 34 + build-tools 34
       - name: Android SDK & licenses
         shell: bash
         run: |
@@ -43,7 +43,7 @@ jobs:
           yes | "$SDKMGR" --licenses || true
           "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      # Cria o esqueleto android/ se o repo tiver só lib/ + pubspec.yaml
+      # Gera android/ se não existir (quando repo só tem lib/ e pubspec.yaml)
       - name: Create Flutter skeleton if missing
         shell: bash
         run: |
@@ -56,6 +56,19 @@ jobs:
             mv lib_src lib
             mv pubspec_src.yaml pubspec.yaml
           fi
+
+      # 🔧 Garante minSdk 21 e compileSdk 34 (evita erro comum do camera/geolocator)
+      - name: Force minSdkVersion 21 and compileSdk 34
+        shell: bash
+        run: |
+          set -e
+          # gradle.properties (novo padrão do Flutter)
+          if grep -q "flutter.minSdkVersion" android/gradle.properties 2>/dev/null; then
+            sed -i 's/flutter.minSdkVersion=.*/flutter.minSdkVersion=21/' android/gradle.properties || true
+          fi
+          # build.gradle (projetos mais antigos)
+          sed -i 's/minSdkVersion[[:space:]]\+[0-9][0-9]*/minSdkVersion 21/' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion[[:space:]]\+[0-9][0-9]*/compileSdkVersion 34/' android/app/build.gradle || true
 
       - name: Flutter doctor (debug)
         run: flutter doctor -v
