@@ -1,5 +1,4 @@
-# .github/workflows/build-apk.yml
-name: Construir APK Android
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -14,15 +13,36 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # tudo roda dentro de mobile/
-    defaults:
-      run:
-        working-directory: mobile
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx3g
+      GRADLE_OPTS: -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Detect Flutter project dir
+        id: detect
+        shell: bash
+        run: |
+          set -e
+          if [ -f "mobile/pubspec.yaml" ]; then
+            echo "FLUTTER_DIR=mobile" >> $GITHUB_ENV
+          elif [ -f "pubspec.yaml" ]; then
+            echo "FLUTTER_DIR=." >> $GITHUB_ENV
+          else
+            echo "❌ pubspec.yaml não encontrado em raiz nem em mobile/"
+            exit 1
+          fi
+          echo "Usando diretório: ${FLUTTER_DIR:-?}"
+          echo "dir=${FLUTTER_DIR:-.}" >> $GITHUB_OUTPUT
+
+      - name: Show repo tree (debug)
+        run: |
+          echo "== Raiz =="
+          ls -la
+          echo "== Projeto Flutter (${FLUTTER_DIR}) =="
+          ls -la "${FLUTTER_DIR}"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -36,16 +56,18 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Flutter doctor (debug)
-        run: flutter doctor -v
+      - name: Flutter doctor
+        run: cd "$FLUTTER_DIR" && flutter doctor -v
 
       - name: Pub get
-        run: flutter pub get
+        run: cd "$FLUTTER_DIR" && flutter pub get
 
-      - name: Dar permissão ao gradlew
-        run: chmod +x android/gradlew
+      - name: Ensure gradlew is executable
+        run: |
+          if [ -f "$FLUTTER_DIR/android/gradlew" ]; then
+            chmod +x "$FLUTTER_DIR/android/gradlew"
+          fi
 
-      # Opcional: força SDK/licenças, útil em projetos que reclamam
       - name: Android SDK & licenses
         shell: bash
         run: |
@@ -58,16 +80,37 @@ jobs:
           yes | "$SDKMGR" --licenses || true
           "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build APK (debug)
-        run: flutter build apk --debug
+      - name: Force minSdk 21 / compileSdk 34 (best effort)
+        shell: bash
+        run: |
+          set -e
+          APP="$FLUTTER_DIR/android/app/build.gradle"
+          if [ -f "$APP" ]; then
+            sed -i 's/minSdkVersion[[:space:]]\+[0-9][0-9]*/minSdkVersion 21/' "$APP" || true
+            sed -i 's/compileSdkVersion[[:space:]]\+[0-9][0-9]*/compileSdkVersion 34/' "$APP" || true
+          fi
+          PROPS="$FLUTTER_DIR/android/gradle.properties"
+          if [ -f "$PROPS" ]; then
+            if grep -q "flutter.minSdkVersion" "$PROPS"; then
+              sed -i 's/flutter.minSdkVersion=.*/flutter.minSdkVersion=21/' "$PROPS" || true
+            else
+              echo "flutter.minSdkVersion=21" >> "$PROPS"
+            fi
+          fi
 
-      - name: Build APK (release)
-        run: flutter build apk --release
+      - name: Build APK (debug)
+        run: cd "$FLUTTER_DIR" && flutter build apk --debug
+
+      - name: Build APK (release - unsigned)
+        run: cd "$FLUTTER_DIR" && flutter build apk --release
+
+      - name: List APKs (debug)
+        run: find "$FLUTTER_DIR/build/app/outputs" -type f -name "*.apk" -print
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: ponto-ai-apks
           path: |
-            mobile/build/app/outputs/flutter-apk/app-debug.apk
-            mobile/build/app/outputs/flutter-apk/app-release.apk
+            ${{ env.FLUTTER_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
+            ${{ env.FLUTTER_DIR }}/build/app/outputs/flutter-apk/app-release.apk
