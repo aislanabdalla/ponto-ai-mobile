@@ -13,24 +13,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      JAVA_TOOL_OPTIONS: -Xmx3g
-      GRADLE_OPTS: -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Detecta se o projeto está na raiz (.) ou em mobile/
-      - name: Detect Flutter dir
-        run: |
-          if [ -f "mobile/pubspec.yaml" ]; then
-            echo "FLUTTER_DIR=mobile" >> $GITHUB_ENV
-          else
-            echo "FLUTTER_DIR=." >> $GITHUB_ENV
-          fi
-          echo "Using dir: ${FLUTTER_DIR:-.}"
-          echo "PWD at start:"; pwd; ls -la
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -44,23 +30,22 @@ jobs:
           channel: stable
           cache: true
 
-      # Normaliza estrutura e nome do app (biblioteca -> lib, garante main.dart)
-      - name: Normalize lib/ and pubspec
+      - name: Detect Flutter dir
         run: |
-          set -e
-          cd "$FLUTTER_DIR"
-          if [ ! -d lib ] && [ -d biblioteca ]; then mv biblioteca lib; fi
-          if [ ! -f lib/main.dart ]; then
-            printf '%s\n' \
-"import 'package:flutter/material.dart';" \
-"void main() => runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('Ponto-AI')))));" \
-> lib/main.dart
-          fi
-          if grep -q '^name:' pubspec.yaml; then
-            sed -i "s/^name:.*/name: ponto_ai/" pubspec.yaml
+          if [ -f "mobile/pubspec.yaml" ]; then
+            echo "FLUTTER_DIR=mobile" >> $GITHUB_ENV
           else
-            printf '%s\n%s\n' "name: ponto_ai" "$(cat pubspec.yaml)" > pubspec.tmp && mv pubspec.tmp pubspec.yaml
+            echo "FLUTTER_DIR=." >> $GITHUB_ENV
           fi
+          echo "Using dir: ${FLUTTER_DIR:-.}"
+
+      - name: Ensure Android project
+        run: |
+          cd "$FLUTTER_DIR"
+          if [ ! -d android ]; then
+            flutter create . --platforms=android
+          fi
+          chmod +x android/gradlew
 
       - name: Flutter --version
         run: cd "$FLUTTER_DIR" && flutter --version
@@ -68,55 +53,11 @@ jobs:
       - name: Flutter pub get
         run: cd "$FLUTTER_DIR" && flutter pub get
 
-      - name: Ensure Android project (create if missing/unsupported)
-        run: |
-          set -e
-          cd "$FLUTTER_DIR"
-          if [ ! -d android ]; then
-            flutter create . --platforms=android
-          fi
-          if [ ! -f android/gradlew ]; then
-            mv lib lib_tmp; mv pubspec.yaml pubspec_tmp.yaml
-            rm -rf android ios
-            flutter create . --platforms=android
-            rm -rf lib; mv lib_tmp lib
-            mv pubspec_tmp.yaml pubspec.yaml
-          fi
-          chmod +x android/gradlew
-
-      - name: Android SDK & licenses
-        run: |
-          set -e
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDKMGR" ]; then SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/bin/sdkmanager"; fi
-          yes | "$SDKMGR" --licenses || true
-          "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Force minSdk/compileSdk (best effort)
-        run: |
-          APP="$FLUTTER_DIR/android/app/build.gradle"
-          PROPS="$FLUTTER_DIR/android/gradle.properties"
-          if [ -f "$APP" ]; then
-            sed -i 's/minSdkVersion[[:space:]]\+[0-9][0-9]*/minSdkVersion 21/' "$APP" || true
-            sed -i 's/compileSdkVersion[[:space:]]\+[0-9][0-9]*/compileSdkVersion 34/' "$APP" || true
-          fi
-          if [ -f "$PROPS" ]; then
-            if grep -q "flutter.minSdkVersion" "$PROPS"; then
-              sed -i 's/flutter.minSdkVersion=.*/flutter.minSdkVersion=21/' "$PROPS" || true
-            else
-              echo "flutter.minSdkVersion=21" >> "$PROPS"
-            fi
-          fi
-
       - name: Build APK (debug)
         run: cd "$FLUTTER_DIR" && flutter build apk --debug
 
       - name: Build APK (release - unsigned)
         run: cd "$FLUTTER_DIR" && flutter build apk --release
-
-      - name: List APKs
-        run: find "$FLUTTER_DIR/build/app/outputs" -type f -name "*.apk" -print
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
