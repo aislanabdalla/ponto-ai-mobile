@@ -23,10 +23,9 @@ jobs:
 
       - name: Detect Flutter dir
         id: detect
-        shell: bash
         run: |
           if [ -f "mobile/pubspec.yaml" ]; then echo "FLUTTER_DIR=mobile" >> $GITHUB_ENV; else echo "FLUTTER_DIR=." >> $GITHUB_ENV; fi
-          echo "dir=${FLUTTER_DIR:-.}" >> $GITHUB_OUTPUT
+          echo "Using dir: ${FLUTTER_DIR:-.}"
 
       - name: Show tree
         run: |
@@ -46,25 +45,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Normalize lib/ and pubspec name
-        shell: bash
+      # Normaliza estrutura: biblioteca->lib, garante main.dart e name seguro no pubspec
+      - name: Normalize lib/ and pubspec
         run: |
           set -e
           cd "$FLUTTER_DIR"
-          # se houver "biblioteca/", renomeia para lib/
           if [ ! -d lib ] && [ -d biblioteca ]; then mv biblioteca lib; fi
-          # garante um main.dart mínimo
           if [ ! -f lib/main.dart ]; then
-            cat > lib/main.dart <<'DART'
-import 'package:flutter/material.dart';
-void main() => runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('Ponto-AI')))));
-DART
+            printf '%s\n' \
+"import 'package:flutter/material.dart';" \
+"void main() => runApp(const MaterialApp(home: Scaffold(body: Center(child: Text(\"Ponto-AI\")))));" \
+> lib/main.dart
           fi
-          # corrige name inválido no pubspec (sem hífen/acentos)
           if grep -q '^name:' pubspec.yaml; then
             sed -i "s/^name:.*/name: ponto_ai/" pubspec.yaml
           else
-            echo "name: ponto_ai" | cat - pubspec.yaml > pubspec.tmp && mv pubspec.tmp pubspec.yaml
+            printf '%s\n%s\n' "name: ponto_ai" "$(cat pubspec.yaml)" > pubspec.tmp && mv pubspec.tmp pubspec.yaml
           fi
 
       - name: Flutter doctor
@@ -73,17 +69,14 @@ DART
       - name: Pub get
         run: cd "$FLUTTER_DIR" && flutter pub get
 
-      - name: Ensure Android project (create if missing/unsupported)
-        shell: bash
+      - name: Ensure Android project (create if missing)
         run: |
           set -e
           cd "$FLUTTER_DIR"
-          # cria android/ se não existir
           if [ ! -d android ]; then
             flutter create . --platforms=android
           fi
-          # se continuar quebrando, regenera android mantendo lib/ e pubspec.yaml
-          if ! [ -f android/gradlew ]; then
+          if [ ! -f android/gradlew ]; then
             mv lib lib_tmp; mv pubspec.yaml pubspec_tmp.yaml
             rm -rf android ios
             flutter create . --platforms=android
@@ -93,7 +86,6 @@ DART
           chmod +x android/gradlew
 
       - name: Android SDK & licenses
-        shell: bash
         run: |
           set -e
           export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -103,7 +95,6 @@ DART
           "$SDKMGR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Force minSdk/compileSdk (best effort)
-        shell: bash
         run: |
           APP="$FLUTTER_DIR/android/app/build.gradle"
           PROPS="$FLUTTER_DIR/android/gradle.properties"
